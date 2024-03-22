@@ -1,8 +1,10 @@
 
-#########################################
-#   Mark-Recovery Model - YOY NP 2022   #
-#       Script by Thornton Ritz         # 
-#########################################
+##########################################
+#   Mark-Recovery Model - YOY NP 2022    #
+#       Script by Thornton Ritz          #
+# Code adapted from Kery and Schaub 2012 #
+#                                        #
+##########################################
 
 #### Read in associated packages ####
 library(tidyverse)
@@ -12,12 +14,13 @@ library(dplyr)
 
 #### Data preparation ##
 ## YOY NP is my capture history file used to create M-array, ##
-## associated site variable used to split m-arrays up by wetland ####
+## associated site variable used to split m-arrays up by wetland using filtering ####
 setwd("/Users/thorn/OneDrive/Desktop/Mark_Recovery_Wetland")
-YOY_NP<- read_excel("YOY_NP_M_Array_Wetland_2.xlsx")
+YOY_NP<- read_excel("YOY_NP_M_Array_Wetland_Final.xlsx")
 YOY_NP$Site<- as.factor(YOY_NP$Site)
 
-#### Environmental Covariate Data Frames - Day 1-64 x 4 wetlands## 
+#### Environmental Covariate Data Frames - Day 1-64 x 4 wetlands 
+## Mean daily values summarized from 4 loggers per wetland ##
 ## Data already scaled and centered, each row represents a wetland ####
 
 DO<- read_excel("YOY_NP_DO_mean_Wetland.xlsx")
@@ -65,17 +68,11 @@ x<-dim(PV)
 PV<- as.numeric(PV)
 dim(PV) <- x
 
-#### Removal of site variable, split up by wetland already #### 
-YOY_NP <- YOY_NP |>
-  select(-Site)
-
-YOY_NP<- as.matrix(YOY_NP)
-x<- dim(YOY_NP)
-dim(YOY_NP) <- x
 
 #### Recovery Rate Contributions ##
-## Did we have nets in the water? ( Yes - 1 No - 0) (42 days post stocking of unsampled growth period) ##
-## Did we capture a YOY NP in those nets? ( Yes - 1 No - 0) (Net) ####
+## Did we have nets in the water? ( Yes - 1 No - 0) ##
+## (42 days post stocking of unsampled growth period) ####
+
 
 Net <- read_excel("YOY_NP_CATCH_REC_Wetland.xlsx")
 Net<- Net |>
@@ -146,30 +143,30 @@ surv[s,t] <- ilogit(logit_surv_mu[s] +beta_DO * DO[s,t]+
                           beta_TEMP * TEMP[s,t])
 }
 
-# Mean daily surv. by wetland, period surv. calculation   
+# Mean daily surv. by wetland to period surv. calculation Berdeen & Otis 2006 #
 surv.mean[s] <- mean(surv[s,])
 surv.int.mean[s] <- surv.mean[s]^64
 
-# Random intercept hyperparameter using common distribution
-# DO & TEMP effect survival the same (slope), each wetland has unique abiotic conditions (intercept)
+# Random intercept hyperparameter using common distribution #
+# DO & TEMP effect survival the same (slope), each wetland has unique abiotic conditions (intercept) #
 logit_surv_mu[s] ~ dnorm(grand.surv.logit.mu, grand.surv.tau)
 
 } 
 
-# Capture indicates prob. to capture ind. (does it go into net), vague prior  
+# Capture indicates prob. to capture ind. (does it go into net), vague prior # 
 capture ~ dunif(0,1)
 
-# Period capture calculation 
+# Period capture calculation #
 int.capture <- 1-(1-capture)^64
 
-# Noninformative priors for covariates 
+# Noninformative priors for covariates #
 beta_DO ~ dnorm(0,0.001)
 beta_TEMP ~ dnorm(0,0.001)
 grand.surv.logit.mu ~ dnorm(0,0.001)
 grand.surv.tau <- 1/grand.surv.sd^2
 grand.surv.sd ~ dunif(0,10)
 
-# Estimate recovery rate 
+# Estimate recovery rate - Net * capture (estimate) x 64 days #
 for(s in 1:n.sites) {
 for (t in 1:n.occasions){
 
@@ -254,9 +251,8 @@ nc <- 3
 mr <- jags(jags.data, inits, parameters, "mr-mnl.jags", n.chains = nc, n.thin = nt,
            n.iter = ni, n.burnin = nb, parallel = TRUE)
 
-
 # Summarize posteriors
-
+  
 print(mr, digits = 5)
 plot(mr)
 
@@ -264,49 +260,64 @@ mr.sum<- mr$summary
 
 densityplot(mr)
 library(lattice)
+library(writexl)
 xyplot(mr)
-write.csv(mr.sum, "model.sum.COV_2.csv")
+write.csv(mr.sum, "Ritz_Model_Results_Final.csv")
 
 
 
-Surv<- as.data.frame(mr$sims.list$surv.mean)
+Surv<- as.data.frame(mr$sims.list$surv.int.mean)
 
 
-write.csv(Surv, "Survival_Simulations_2.csv")
-
-
+write.csv(Surv, "Int_Survival_Sims_Ritz_Final.csv")
 
 
 
 
-TEMP_rng<- range(TEMP[3,])
+#### TEMP effect ####
+
+
+TEMP_rng<- range(TEMP)
 TEMP_seq<- seq(TEMP_rng[1], TEMP_rng[2], length.out=100)
-TEMP_std<- (TEMP_seq-mean(TEMP[3,]))/ sd(TEMP[3,])
+TEMP_std<- (TEMP_seq-mean(TEMP))/ sd(TEMP)
 head(TEMP_std)
 
-surv_est<- mr$mean$logit_surv_mu[3] + mr$mean$beta_TEMP[3] * TEMP_std
+surv_est<- mr$mean$grand.surv.logit.mu + mr$mean$beta_TEMP * TEMP_std
 surv_est<- plogis(surv_est)
 head(surv_est)  
 
-view(surv_est)
-plot(TEMP_seq, surv_est, type = 'l', xlab="TEMP", ylab="Surv")
-
-nsamples<- mr$mcmc.info$n.samples
-
-surv_post<- matrix(NA, nrow = nsamples, ncol=100)
- for(i in 1:100){
-   surv_post[,i] <- mr$sims.list$logit_surv_mu[3] + mr$sims.list$beta_TEMP[3] * TEMP_std[i]
- }
-
-surv_post<- plogis(surv_post) 
-
-surv_lower<- apply(surv_post, 2, quantile, 0.025)
-surv_upper<- apply(surv_post, 2, quantile, 0.975)
+nsamples <- mr$mcmc.info$n.samples
+nsamples
 
 
-plot.new()
-plot(TEMP_seq, surv_est, type='l', xlab="TEMP", ylab="Survival")
-polygon(c(TEMP_seq, rev(TEMP_seq)),
-        c(surv_lower, rev(surv_upper)),
-        col="grey90", border=NA)
-lines(TEMP_seq, surv_est)
+surv_post <- matrix(NA, nrow=nsamples, ncol=100)
+for (i in 1:100){
+  surv_post[,i] <- mr$sims.list$grand.surv.logit.mu + mr$sims.list$beta_TEMP * TEMP_std[i]
+}
+surv_post <- plogis(surv_post)
+surv_post[1:5,1:5]
+
+surv_lower <- apply(surv_post, 2, quantile, 0.025) # lower bound of 95% ci
+surv_upper <- apply(surv_post, 2, quantile, 0.975) 
+
+
+plot_data <- data.frame(TEMP=TEMP_seq, surv=surv_est, lower=surv_lower, upper=surv_upper)
+
+plot_data<- plot_data |>
+  mutate(surv=surv^64,
+         lower=lower^64,
+         upper=upper^64,
+        Unscaled_TEMP=(TEMP*3.309)+17.76)
+
+
+ggplot(plot_data, aes(x=Unscaled_TEMP)) +
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.2) +
+  geom_line(aes(y=surv))+
+  theme_bw()+ylab("Period Survival Probability")+xlab("Water Temperature (°C)")+
+  theme(axis.text=element_text(size=14), axis.title.y = element_text(size=14),
+        axis.title = element_text(size=14),
+        strip.text = element_text(size=14))+
+  scale_x_continuous(breaks=seq(10,24,2), limits=c(10,24))+
+  scale_y_continuous(breaks=seq(0,0.90,0.1))
+ggsave("Water_Temp_Effect.png", dpi=300, height = 4, width=6)
+
