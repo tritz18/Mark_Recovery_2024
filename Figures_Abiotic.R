@@ -28,6 +28,11 @@ Abiotic<- Abiotic_Raw |>
          "FC_REF7", "FC_SP5", "FC_SP6", 
          "PV_REF1", "PV_REF2", "PV_SP4", "PV_SP5"))
 
+Abiotic_Summary<- Abiotic |>
+  group_by(Wetland) |>
+  summarize(Mean_TEMP=mean(TEMP), sd_TEMP=sd(TEMP), 
+            Mean_DO= mean(DO), sd_DO=sd(DO))
+
 
 TEMP<- ggplot(Abiotic, aes(Wetland, TEMP))+
   stat_boxplot(geom="errorbar")+
